@@ -15,122 +15,94 @@
 .REG s2, ct_OCR_H_reg
 .REG s3, uart_out_reg
 .REG sF, int_mask_reg
+.REG s4, tmp_reg
 
+.REG sA, output_mail
+.REG sB, input_mail
+.REG sE, read_count
+.REG sD, bit
+.REG s8, signed
+
+.CONST FCLK_100, 0b1001
+.CONST FCLK_1000000, 0b1101
 
 INIT:
 	EINT
-	LOAD s4, 1
-	OUT s4, ct_int_mask
-	OUT s4, gpio_B_dir
+	LOAD read_count, 12
+	LOAD tmp_reg, 1
+	OUT tmp_reg, ct_int_mask ; set icp1
+	OUT tmp_reg, gpio_B_dir ; set GPIO pin as output
 	LOAD int_mask_reg, 32
-	OUT int_mask_reg, int_mask 
-	LOAD ct_config_reg, 9 ; fclk / 100
+	OUT int_mask_reg, int_mask ; only timer can generate interrupts
+	LOAD ct_config_reg, FCLK_100 ; fclk / 100
 	OUT ct_config_reg, ct_config
 	LOAD ct_lbyte_reg, 0b11110100  ; 500 us
 	LOAD ct_OCR_H_reg, 1  ; 500 us
 	OUT ct_lbyte_reg, ct_lbyte
 	OUT ct_OCR_H_reg, ct_OCR_H
 
-	LOAD s5, 0
-	OUT s5, gpio_B_out ; zero na linii
+	LOAD tmp_reg, 0
+	OUT tmp_reg, gpio_B_out ; put line low
 
 	CALL delay
 	CALL wait1u
 	
-	LOAD s5, 0
-	OUT s5, gpio_B_dir
-
+	LOAD tmp_reg, 0
+	OUT tmp_reg, gpio_B_dir ; release line
+	LOAD ct_lbyte_reg, 100 ; 120 us
+	LOAD ct_OCR_H_reg, 0
+	OUT ct_lbyte_reg, ct_lbyte
+	OUT ct_OCR_H_reg, ct_OCR_H
 	CALL delay
+	IN tmp_reg, gpio_B_in
+	TEST tmp_reg, 0
+	JUMP z, INIT ; something went wrong, line is not low, return to beginning
+
+	; send SKIP_ROM command [CCh], as we have only one device 
+	LOAD output_mail, 0xCC
+	CALL SEND_VALUE
 	
 main:
-
-	LOAD s5, 1 ; bierzemy linie
+	LOAD s5, 1 ; configure PIN as output
 	OUT s5, gpio_B_dir
 
-	; wysylamy convert T
-	CALL write_1
-	CALL write_0
-	CALL write_0
-	CALL write_0
-	CALL write_1
-	CALL write_0
-	CALL write_0
+	; issue Convert T command
+	LOAD output_mail, 0x44
+	CALL SEND_VALUE
 
-; czkamy 1s
-	LOAD ct_config_reg, 13 ; fclk / 100
+	;wait 1s
+	LOAD ct_config_reg, FCLK_1000000 ; fclk / 1 000 000
 	OUT ct_config_reg, ct_config
-	LOAD ct_lbyte_reg, 0b01100100  ; 1000 ms
-	LOAD ct_OCR_H_reg, 0  ; 1000 ms
+	LOAD ct_lbyte_reg, 0b01100100  ; 1s
+	LOAD ct_OCR_H_reg, 0  ; 1s
 	OUT ct_lbyte_reg, ct_lbyte
 	OUT ct_OCR_H_reg, ct_OCR_H
 	CALL delay
 	
-	CALL write_1
-	CALL write_0
-	CALL write_1
-	CALL write_1
-	CALL write_1
-	CALL write_1
-	CALL write_1
-	CALL write_0
+	; READ SCRATCHPAD
+	LOAD output_mail, 0xBE
+	CALL SEND_VALUE
 
-	LOAD s8, 0
+	CALL wait1u
 
-	LOAD s9, 1 ; ktory bit ustawiamy
-	CALL read
-	TEST s7, 1
-	CALL z, set_bit
+	CALL READ_VALUE
+	CALL parse_value
 
-	LOAD s9, 2 ; ktory bit ustawiamy
-	CALL read
-	TEST s7, 1
-	CALL z, set_bit
+; send results to UART
+	TEST signed, 1
+	CALL z, print_sign
 
-	LOAD s9, 4 ; ktory bit ustawiamy
-	CALL read
-	TEST s7, 1
-	CALL z, set_bit
+	OUT input_mail, tx
+	JUMP INIT
 
-	LOAD s9, 8 ; ktory bit ustawiamy
-	CALL read
-	TEST s7, 1
-	CALL z, set_bit
-
-	LOAD s9, 16 ; ktory bit ustawiamy
-	CALL read
-	TEST s7, 1
-	CALL z, set_bit
-
-	LOAD s9, 32 ; ktory bit ustawiamy
-	CALL read
-	TEST s7, 1
-	CALL z, set_bit
-
-	LOAD s9, 64 ; ktory bit ustawiamy
-	CALL read
-	TEST s7, 1
-	CALL z, set_bit
-
-	LOAD s9, 128 ; ktory bit ustawiamy
-	CALL read
-	TEST s7, 1
-	CALL z, set_bit
-
-; zczytujemy temp
-
-	JUMP main
-
-	OUT ct_config_reg, ct_config
-	LOAD uart_out_reg, 0
-	LOAD s5, 0
+print_sign:
+	LOAD tmp_reg, '-'
+	OUT tmp_reg, tx
+	RET
 
 set_bit:
-	;LOAD s8, s8 | s9
-	OR s8, s9
-
-LOOP2:
-		TEST s6, 0
-		JUMP z, LOOP2
+	OR input_mail, bit
+	RET
 
 write_0:
 		LOAD s5, 1
@@ -168,7 +140,7 @@ read:
 	CALL wait1u
 	LOAD s5, 0
 	OUT s5, gpio_B_dir
-	LOAD ct_config_reg, 9 ; fclk / 100
+	LOAD ct_config_reg, FCLK_100 ; fclk / 100
 	OUT ct_config_reg, ct_config
 	LOAD ct_lbyte_reg,  0b00011110; 30 us
 	LOAD ct_OCR_H_reg, 0  ; 30 us
@@ -177,7 +149,6 @@ read:
 	CALL wait1u
 	RET
 	
-
 delay:
 	OUT ct_lbyte_reg, ct_lbyte
 	OUT ct_OCR_H_reg, ct_OCR_H
@@ -190,8 +161,7 @@ delay:
 	call wait1u
 	RET
 
-
-wait1u:	; czekamy 2us
+wait1u:	; wait 2us
 	LOAD sC, 0
 	wait:
 		ADD sC, 1
@@ -199,22 +169,57 @@ wait1u:	; czekamy 2us
 		JUMP nz, wait
 		ret
 
-
 int_handler:
 	LOAD s6, 1
 	LOAD s5, 0
-	SUB ct_config_reg, 32 ; wylacz timer
+	SUB ct_config_reg, 32 ; turn off timer
 	OUT ct_config_reg, ct_config
 	OUT s5, ct_status
 	OUT s5, int_status
 	RETI
 
-	;OUT uart_out_reg, tx
-	;ADD uart_out_reg, 1
-	;LOAD s5, 0
-	;OUT s5, ct_status
-	;OUT s5, int_status
-	;RETI
+; Send predefined value set in output_mail register
+SEND_VALUE:
+	LOAD tmp_reg, 0
+	write_bit_loop:
+		COMP tmp_reg, 8
+		RET z
+		TEST output_mail, tmp_reg
+		CALL z, write_1
+		CALL nz, write_0
+		ADD tmp_reg, 1
+		JUMP write_bit_loop
+
+; Read predefined number of bits and store it in input box
+READ_VALUE:
+	LOAD tmp_reg, 0
+	LOAD bit, 1
+	; Miss 4 bits which are decimal part
+	CALL read
+	CALL read
+	CALL read
+	CALL read
+	read_bit_loop:
+		COMP tmp_reg, read_count
+		RET z
+		CALL read
+		TEST s7, 1
+		CALL z, set_bit
+		SL0 bit
+		ADD tmp_reg, 1
+		JUMP read_bit_loop
+
+parse_value:
+	TEST input_mail, 128
+	JUMP Z, sign
+	LOAD signed, 0
+	RET
+	sign:
+		LOAD tmp_reg, 128
+		AND input_mail, 0b01111111
+		SUB tmp_reg, input_mail
+		LOAD input_mail, tmp_reg
+		LOAD signed, 1
 
 .CSEG 0x3FF
 	JUMP int_handler
