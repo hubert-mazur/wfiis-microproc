@@ -30,8 +30,6 @@
 
 PRE_INIT:
 	EINT
-	LOAD tmp_reg, 's'
-	OUT tmp_reg, tx
 	LOAD tmp_reg, 1
 	OUT tmp_reg, ct_int_mask ; set icp1
 	LOAD int_mask_reg, 32
@@ -74,6 +72,11 @@ main:
 
 	CALL PRINT_TO_SCREEN
 
+	LOAD tmp_reg, 13
+	OUT tmp_reg, tx
+
+	LOAD tmp_reg, 10
+	OUT tmp_reg, tx
 	
 	JUMP PRE_INIT
 
@@ -254,8 +257,7 @@ SEND_VALUE:
 ; Read predefined number of bits and store it in input box
 READ_VALUE:
 	LOAD input_mail, 0
-	LOAD s5, 'r'
-	OUT s5, tx
+
 	;LOAD tmp_reg, 0
 	LOAD bit, 1
 	; Miss 4 bits which are decimal part
@@ -414,3 +416,4 @@ print_9:
 
 .CSEG 0x3FF
 	JUMP int_handler
+
