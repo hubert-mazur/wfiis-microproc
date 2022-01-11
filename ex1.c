@@ -27,18 +27,19 @@ void set_gpio_state(bool high);
 void init_gpio();
 void send_message(uint8_t val);
 int init_1_wire();
-float read_value();
+void read_value(int *temp, float *decimal);
 
 int main()
 {
-	float temp;
-	char buffer[100];
+	char buffer[300];
+	float decimal;
+	int temp;
 
 	init_UART();
 	init_gpio();
 
 	print_string("Init!\r\n");
-
+	
 	while (1)
 	{
 		init_1_wire();
@@ -47,14 +48,16 @@ int main()
 		init_1_wire();
 		send_message(READ_SCRATCHPAD);
 		wait(1);
-		temp = read_value();
-		sprintf(buffer, "%f.4 C\r\n", temp);
+		read_value(&temp, &decimal);
+		
+		sprintf(buffer, "%.2f C\r\n", decimal + temp);
 		print_string(buffer);
 	}
 }
 
 int init_1_wire()
 {
+
 	change_pin_direction(false);
 	set_gpio_state(false);
 	wait(500);
@@ -76,8 +79,7 @@ int init_1_wire()
 void init_gpio()
 {
 
-	LPC_PINCON->PINSEL1 &= (3 << 11);
-	LPC_PINCON->PINSEL1 |= (1 << 11);
+	LPC_PINCON->PINSEL1 &= ~(3 << 11);
 }
 
 void init_UART()
@@ -124,14 +126,14 @@ void wait(uint32_t time)
 	// wlaczenie timera
 	LPC_TIM0->TCR |= 1;
 
-	while (!timer_done)
-		;
+	while (!timer_done);
 }
 
 void TIMER0_IRQHandler(void)
 {
 	LPC_TIM0->TC = 0;
 	LPC_TIM0->IR = 1;
+	LPC_TIM0->TCR = 0;
 	timer_done = true;
 }
 
@@ -139,18 +141,18 @@ void change_pin_direction(bool input)
 {
 
 	if (input)
-		LPC_GPIO0->FIODIR0 &= ~(1 << 21);
+		LPC_GPIO0->FIODIR &= ~(1 << 21);
 	else
-		LPC_GPIO0->FIODIR0 |= (1 << 21);
+		LPC_GPIO0->FIODIR |= (1 << 21);
 }
 
 void set_gpio_state(bool high)
 {
 
 	if (high)
-		LPC_GPIO0->FIOSET0 |= (1 << 21);
+		change_pin_direction(true);
 	else
-		LPC_GPIO0->FIOSET0 &= ~(1 << 21);
+		LPC_GPIO0->FIOCLR = (1 << 21);
 }
 
 void send_0()
@@ -170,7 +172,7 @@ void send_1()
 	set_gpio_state(false);
 	wait(1);
 	set_gpio_state(true);
-	wait(30);
+	wait(60);
 }
 
 bool read_message()
@@ -183,7 +185,7 @@ bool read_message()
 	change_pin_direction(true);
 	wait(1);
 
-	bit = (LPC_GPIO0->FIOSET0 >> 21) & 1;
+	bit = (LPC_GPIO0->FIOPIN >> 21) & 1;
 	wait(45);
 
 	return (bit);
@@ -191,32 +193,32 @@ bool read_message()
 
 void send_message(uint8_t val)
 {
+
 	for (int i = 0; i < 8; i++)
 	{
-		if (val & i)
+		if (val & (1 << i))
 			send_1();
 		else
 			send_0();
 	}
 }
 
-float read_value()
+void read_value(int *val, float *decimal)
 {
-	uint8_t val;
-	float decimal;
-
-	val = 0;
+	
+	*val = 0;
 
 	for (int i = 0; i < 4; i++)
-		val |= read_message() << i;
+		*val |= read_message() << i;
 
-	decimal = ((float)val / (1 << 4));
-	val = 0;
+	*decimal = ((float)*val / (1 << 4));
+	*val = 0;
 
 	for (int i = 0; i < 8; i++)
-	{
-		val |= read_message() << i;
+		*val |= read_message() << i;
+	
+	if (*val & (1 << 8)) {
+		*val &= ~(1 << 8);
+		*val -= 1 << 8;
 	}
-
-	return val + decimal;
 }
